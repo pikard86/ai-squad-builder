@@ -7,9 +7,9 @@ import { RosterModal } from './components/RosterModal';
 import { PlayerDetailModal } from './components/PlayerDetailModal';
 import { 
   CardData, FileType, TeamLineup, PositionRole, 
-  ROLE_LABELS, FORMATIONS, Formation 
+  ROLE_LABELS, FORMATIONS, Formation, TeamSynergy 
 } from './types';
-import { analyzeResume } from './services/geminiService';
+import { analyzeResume, analyzeTeamSynergy, autoArrangeLineup } from './services/geminiService';
 import { fileToBase64, detectFileType, extractTextFromDocx } from './utils/parser';
 import { Trophy, Users, PlusCircle, LayoutDashboard, ArrowLeft, Briefcase, Eye, ChevronDown } from 'lucide-react';
 
@@ -25,11 +25,16 @@ function App() {
   // Roster State (All Uploaded Candidates)
   const [roster, setRoster] = useState<CardData[]>([]);
   
-  // Lineup State (Assigned Roles) - Now using flexible 'players' record
+  // Lineup State (Assigned Roles)
   const [lineup, setLineup] = useState<TeamLineup>({
-    players: {}, // Initialize empty
+    players: {}, 
     scrumMasterId: null
   });
+
+  // Analysis State
+  const [teamAnalysis, setTeamAnalysis] = useState<TeamSynergy | null>(null);
+  const [isAnalyzingTeam, setIsAnalyzingTeam] = useState(false);
+  const [isArranging, setIsArranging] = useState(false);
 
   // Scouting State
   const [currentScout, setCurrentScout] = useState<CardData | null>(null);
@@ -88,7 +93,6 @@ function App() {
       const newPlayers = { ...prev.players };
       delete newPlayers[role];
 
-      // If the removed player was Scrum Master, remove that badge
       let newScrumMasterId = prev.scrumMasterId;
       if (player && prev.scrumMasterId === player.id) {
         newScrumMasterId = null;
@@ -100,12 +104,13 @@ function App() {
         scrumMasterId: newScrumMasterId 
       };
     });
+    // Reset analysis when lineup changes
+    setTeamAnalysis(null);
   };
 
   const handleSetScrumMaster = (playerId: string) => {
     setLineup(prev => ({
         ...prev,
-        // Toggle: if already SM, remove it, otherwise set it
         scrumMasterId: prev.scrumMasterId === playerId ? null : playerId
     }));
   };
@@ -117,7 +122,9 @@ function App() {
 
         // 1. Check if player is already in another slot and remove them
         for (const key of Object.keys(newPlayers)) {
-           if (newPlayers[key]?.id === candidate.id) {
+           // Explicit check to avoid TS errors
+           const p = newPlayers[key] as CardData | null;
+           if (p?.id === candidate.id) {
              delete newPlayers[key];
            }
         }
@@ -133,36 +140,27 @@ function App() {
       
       setModalOpen(false);
       setSelectedRole(null);
+      // Reset analysis when lineup changes
+      setTeamAnalysis(null);
     }
   };
 
-  // Central update handler to keep image uploads in sync
   const handlePlayerUpdate = (updatedPlayer: CardData) => {
-    // Update Roster
     setRoster(prev => prev.map(p => p.id === updatedPlayer.id ? updatedPlayer : p));
-
-    // Update Lineup
     setLineup(prev => {
       const newPlayers = { ...prev.players };
       let changed = false;
       for (const key in newPlayers) {
-        if (newPlayers[key]?.id === updatedPlayer.id) {
+        const p = newPlayers[key] as CardData | null;
+        if (p?.id === updatedPlayer.id) {
           newPlayers[key] = updatedPlayer;
           changed = true;
         }
       }
       return changed ? { ...prev, players: newPlayers } : prev;
     });
-
-    // Update Scout View
-    if (currentScout?.id === updatedPlayer.id) {
-      setCurrentScout(updatedPlayer);
-    }
-
-    // Update Modal View
-    if (viewingPlayer?.id === updatedPlayer.id) {
-      setViewingPlayer(updatedPlayer);
-    }
+    if (currentScout?.id === updatedPlayer.id) setCurrentScout(updatedPlayer);
+    if (viewingPlayer?.id === updatedPlayer.id) setViewingPlayer(updatedPlayer);
   };
 
   const handleFormationChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -170,10 +168,55 @@ function App() {
     const newFormation = FORMATIONS.find(f => f.id === formationId);
     if (newFormation) {
       setCurrentFormation(newFormation);
+      setTeamAnalysis(null); // Reset analysis on formation change
     }
   };
 
-  // Helper to find active role for roster display
+  const handleRunAnalysis = async () => {
+    setIsAnalyzingTeam(true);
+    try {
+      const result = await analyzeTeamSynergy(lineup, currentFormation);
+      setTeamAnalysis(result);
+    } catch (err) {
+      console.error("Analysis failed", err);
+      // Optional: Add toast or error state
+    } finally {
+      setIsAnalyzingTeam(false);
+    }
+  };
+
+  const handleAutoArrange = async () => {
+    if (roster.length === 0) return;
+    setIsArranging(true);
+    setTeamAnalysis(null); // Clear old analysis
+
+    try {
+      const assignmentMap = await autoArrangeLineup(roster, currentFormation);
+      
+      const newPlayers: Record<string, CardData | null> = {};
+      
+      // Map IDs back to player objects
+      for (const [slotId, playerId] of Object.entries(assignmentMap)) {
+        const player = roster.find(p => p.id === playerId);
+        if (player) {
+          newPlayers[slotId] = player;
+        }
+      }
+
+      setLineup(prev => ({
+        ...prev,
+        players: newPlayers,
+        // Optional: Keep SM if they are still in the lineup, else clear
+        scrumMasterId: newPlayers[Object.keys(newPlayers).find(key => newPlayers[key]?.id === prev.scrumMasterId) || ''] ? prev.scrumMasterId : null
+      }));
+
+    } catch (err) {
+      console.error("Auto arrange failed", err);
+    } finally {
+      setIsArranging(false);
+    }
+  };
+
   const getPlayerRole = (playerId: string) => {
     for (const [key, val] of Object.entries(lineup.players)) {
       if (val && val.id === playerId) {
@@ -199,7 +242,6 @@ function App() {
             </div>
           </div>
           
-          {/* Navigation */}
           <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700">
              <button 
                 onClick={() => setViewMode('team')}
@@ -263,7 +305,14 @@ function App() {
            <div className="w-full grid grid-cols-1 lg:grid-cols-4 gap-6 h-full">
               {/* Left Sidebar: Stats & Roster */}
               <div className="lg:col-span-1 order-2 lg:order-1 space-y-6">
-                 <TeamStats lineup={lineup} />
+                 <TeamStats 
+                   lineup={lineup} 
+                   analysis={teamAnalysis}
+                   onAnalyze={handleRunAnalysis}
+                   onAutoArrange={handleAutoArrange}
+                   isAnalyzing={isAnalyzingTeam}
+                   isArranging={isArranging}
+                 />
                  
                  <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-4 backdrop-blur-md">
                     <h3 className="font-oswald text-xl uppercase text-slate-300 mb-4 flex items-center gap-2">
@@ -342,6 +391,7 @@ function App() {
                  <TeamPitch 
                    lineup={lineup} 
                    formation={currentFormation}
+                   analysis={teamAnalysis}
                    onSlotClick={handleSlotClick} 
                    onRemovePlayer={handleRemoveFromSlot}
                    onSetScrumMaster={handleSetScrumMaster}

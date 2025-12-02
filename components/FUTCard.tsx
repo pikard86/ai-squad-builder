@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { CardData } from '../types';
 import { motion } from 'framer-motion';
-import { Upload, User, Crown } from 'lucide-react';
+import { Upload, User, Crown, Activity } from 'lucide-react';
 import { RadarGraph } from './RadarGraph';
 
 interface FUTCardProps {
@@ -11,6 +11,7 @@ interface FUTCardProps {
   onClick?: () => void;
   isScrumMaster?: boolean;
   onImageUpdate?: (image: string) => void;
+  fitness?: { score: number; reason: string }; // New prop for fitness analysis
 }
 
 export const FUTCard: React.FC<FUTCardProps> = ({ 
@@ -19,7 +20,8 @@ export const FUTCard: React.FC<FUTCardProps> = ({
   variant = 'full', 
   onClick, 
   isScrumMaster = false,
-  onImageUpdate
+  onImageUpdate,
+  fitness
 }) => {
   // Prioritize initialImage, then data.imageUrl, then null
   const [image, setImage] = useState<string | null>(initialImage || data.imageUrl || null);
@@ -58,6 +60,13 @@ export const FUTCard: React.FC<FUTCardProps> = ({
   const leftStats = data.attributes.slice(0, 3);
   const rightStats = data.attributes.slice(3, 6);
 
+  // Helper for fitness color
+  const getFitnessColor = (score: number) => {
+    if (score >= 80) return 'bg-green-600 border-green-400 text-white';
+    if (score >= 50) return 'bg-yellow-500 border-yellow-300 text-black';
+    return 'bg-red-600 border-red-400 text-white';
+  };
+
   if (variant === 'mini') {
     return (
       <motion.div
@@ -75,11 +84,19 @@ export const FUTCard: React.FC<FUTCardProps> = ({
                        {data.nationality.substring(0,3)}
                     </div>
                   </div>
-                  {isScrumMaster && (
-                    <div className="absolute top-0 right-0 bg-blue-600 text-white rounded-bl-lg p-1 shadow-md z-20" title="Scrum Master">
-                      <Crown className="w-3 h-3" />
-                    </div>
-                  )}
+                  <div className="flex flex-col gap-1 items-end">
+                    {isScrumMaster && (
+                        <div className="bg-blue-600 text-white rounded-bl-lg p-1 shadow-md z-20" title="Scrum Master">
+                        <Crown className="w-3 h-3" />
+                        </div>
+                    )}
+                    {/* Fitness Badge Mini */}
+                    {fitness && (
+                        <div className={`rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold shadow-md z-20 border ${getFitnessColor(fitness.score)}`} title={`Role Fit: ${fitness.score} - ${fitness.reason}`}>
+                            {fitness.score}
+                        </div>
+                    )}
+                  </div>
                </div>
                
                <div className="relative w-16 h-16 my-1 rounded-full overflow-hidden border-2 border-[#362d18]/20 bg-[#362d18]/5">
@@ -143,6 +160,13 @@ export const FUTCard: React.FC<FUTCardProps> = ({
                  <Upload className="w-6 h-6 opacity-0 group-hover:opacity-50" />
                </div>
                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+               
+               {/* Full Card Fitness Overlay */}
+               {fitness && (
+                 <div className={`absolute top-0 right-0 px-2 py-1 rounded-bl-xl border-b border-l shadow-lg text-xs font-bold uppercase flex items-center gap-1 ${getFitnessColor(fitness.score)}`}>
+                   <Activity className="w-3 h-3" /> Fit: {fitness.score}
+                 </div>
+               )}
             </div>
           </div>
 
@@ -180,9 +204,15 @@ export const FUTCard: React.FC<FUTCardProps> = ({
 
           {/* Chemistry/Summary */}
           <div className="mt-auto pt-2 border-t border-[#b98e28]/20">
-             <p className="text-xs font-roboto font-medium text-center leading-tight opacity-90 line-clamp-3 italic">
-               "{data.summary}"
-             </p>
+             {fitness ? (
+                 <p className="text-xs font-roboto font-bold text-center leading-tight opacity-100 italic text-slate-900 line-clamp-2 mb-1">
+                   Match Analysis: {fitness.reason}
+                 </p>
+             ) : (
+                 <p className="text-xs font-roboto font-medium text-center leading-tight opacity-90 line-clamp-3 italic">
+                   "{data.summary}"
+                 </p>
+             )}
              <div className="mt-2 flex justify-center items-center gap-2">
                 <div className="h-4 w-4 bg-green-600 rounded-full shadow-inner border border-green-800" title="Chemistry: Perfect" />
                 <span className="text-xs font-bold uppercase tracking-wider">Talent Scout Basic</span>

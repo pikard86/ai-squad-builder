@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, Schema, Part } from "@google/genai";
-import { CardData } from '../types';
+import { CardData, TeamLineup, Formation, TeamSynergy, ROLE_LABELS } from '../types';
 
 const API_KEY = process.env.API_KEY || '';
 
@@ -141,6 +141,164 @@ export const analyzeResume = async (
 
   } catch (error) {
     console.error("Gemini Analysis Error:", error);
+    throw error;
+  }
+};
+
+export const analyzeTeamSynergy = async (
+  lineup: TeamLineup,
+  formation: Formation
+): Promise<TeamSynergy> => {
+  if (!API_KEY) throw new Error("API Key is missing");
+  const ai = new GoogleGenAI({ apiKey: API_KEY });
+
+  // Filter out empty slots for the prompt
+  const assignedPlayers = Object.entries(lineup.players)
+    .filter(([_, player]) => player !== null)
+    .map(([role, player]) => ({
+      roleId: role,
+      roleName: ROLE_LABELS[role] || role,
+      player: {
+        name: player?.name,
+        position: player?.position,
+        overall: player?.overall,
+        attributes: player?.attributes,
+        techSkills: player?.techSkills
+      }
+    }));
+
+  if (assignedPlayers.length === 0) {
+    throw new Error("Lineup is empty");
+  }
+
+  const prompt = `
+    Analyze the fitness and synergy of this software engineering team based on the chosen formation.
+
+    **Formation**: ${formation.name}
+    **Description**: ${formation.description}
+
+    **Current Lineup Assignments**:
+    ${JSON.stringify(assignedPlayers, null, 2)}
+
+    **Task**:
+    1. Evaluate each player's fitness for their ASSIGNED ROLE (0-100). 
+       - Low score (Red): Huge mismatch (e.g., Junior in Lead role, Backend dev in UX role, or mismatch in tech stack).
+       - Medium score (Yellow): Okay but not ideal (e.g., Generalist in Specialist role).
+       - High score (Green): Perfect match (Skills and Experience align with Role).
+    2. Provide a short reason for the score.
+    3. Calculate an OVERALL TEAM SYNERGY score (0-100) based on role coverage and balance.
+
+    **Output Format (JSON)**:
+    {
+      "overallScore": number,
+      "summary": "string",
+      "roleFitness": {
+        "roleId_1": { "score": number, "reason": "string" },
+        "roleId_2": { "score": number, "reason": "string" },
+        ...
+      }
+    }
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        responseMimeType: "application/json",
+      }
+    });
+
+    const text = response.text;
+    if (!text) throw new Error("No response from AI");
+    
+    const result = JSON.parse(text);
+
+    const synergy: TeamSynergy = {
+      overallScore: result.overallScore || 0,
+      summary: result.summary || "Analysis failed.",
+      roleFitness: {}
+    };
+
+    if (result.roleFitness) {
+        for (const [key, val] of Object.entries(result.roleFitness)) {
+             // @ts-ignore
+             synergy.roleFitness[key] = { roleId: key, score: val.score, reason: val.reason };
+        }
+    }
+
+    return synergy;
+
+  } catch (error) {
+    console.error("Team Synergy Analysis Error:", error);
+    throw error;
+  }
+};
+
+export const autoArrangeLineup = async (
+  roster: CardData[],
+  formation: Formation
+): Promise<Record<string, string>> => {
+  if (!API_KEY) throw new Error("API Key is missing");
+  const ai = new GoogleGenAI({ apiKey: API_KEY });
+
+  // Summarize roster to save tokens
+  const simplifiedRoster = roster.map(p => ({
+    id: p.id,
+    name: p.name,
+    position: p.position,
+    overall: p.overall,
+    attributes: p.attributes.reduce((acc, attr) => ({...acc, [attr.label]: attr.value}), {}),
+    techSkills: p.techSkills?.map(t => `${t.name} (${t.rating})`).join(', ')
+  }));
+
+  const slots = formation.slots.map(s => ({
+    id: s.id,
+    roleName: ROLE_LABELS[s.id] || s.id
+  }));
+
+  const prompt = `
+    You are a Squad Builder AI. Assign the best players from the roster to the formation slots to maximize Team Overall and Synergy.
+    
+    **Constraints:**
+    1. Each player can only be assigned to one slot.
+    2. Try to fill all slots if possible.
+    3. Match player skills/roles to the slot requirements (e.g. 'fe1' needs Frontend skills, 'devops' needs CI/CD/Cloud).
+    4. It is better to leave a slot empty than to put a completely unqualified person (e.g. Junior Frontend as Engineering Manager), but prefer filling slots if they are somewhat capable.
+
+    **Roster**:
+    ${JSON.stringify(simplifiedRoster)}
+
+    **Formation Slots**:
+    ${JSON.stringify(slots)}
+
+    **Task**:
+    Return a JSON object where keys are Slot IDs and values are Player IDs.
+    
+    **Example Output**:
+    {
+      "manager": "player_id_123",
+      "fe1": "player_id_456"
+    }
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        responseMimeType: "application/json",
+      }
+    });
+
+    const text = response.text;
+    if (!text) throw new Error("No response from AI");
+    
+    const result = JSON.parse(text);
+    return result; // Record<string, string>
+
+  } catch (error) {
+    console.error("Auto Arrange Error:", error);
     throw error;
   }
 };

@@ -19,7 +19,8 @@ export const RosterModal: React.FC<RosterModalProps> = ({ isOpen, onClose, candi
   const getExistingRole = (candidateId: string): string | null => {
     // Iterate over values of the players record
     for (const [key, player] of Object.entries(lineup.players)) {
-       if (player && player.id === candidateId) {
+       const p = player as CardData | null;
+       if (p && p.id === candidateId) {
           return ROLE_LABELS[key] || key;
        }
     }

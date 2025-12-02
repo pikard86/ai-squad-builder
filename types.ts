@@ -70,6 +70,20 @@ export interface TeamLineup {
   scrumMasterId: string | null;
 }
 
+// -- Analysis Types --
+
+export interface RoleFitness {
+  roleId: string;
+  score: number; // 0-100
+  reason: string;
+}
+
+export interface TeamSynergy {
+  overallScore: number; // 0-100
+  summary: string;
+  roleFitness: Record<string, RoleFitness>; // key is roleId
+}
+
 // -- Formation Definitions --
 
 export interface PitchPosition {

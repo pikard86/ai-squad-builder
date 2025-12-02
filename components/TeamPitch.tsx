@@ -1,5 +1,5 @@
 import React from 'react';
-import { TeamLineup, PositionRole, ROLE_LABELS, CardData, Formation } from '../types';
+import { TeamLineup, PositionRole, ROLE_LABELS, CardData, Formation, TeamSynergy } from '../types';
 import { FUTCard } from './FUTCard';
 import { Plus, X, Crown, RefreshCcw } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -7,18 +7,22 @@ import { motion } from 'framer-motion';
 interface TeamPitchProps {
   lineup: TeamLineup;
   formation: Formation;
+  analysis: TeamSynergy | null;
   onSlotClick: (role: PositionRole) => void;
   onRemovePlayer: (role: PositionRole) => void;
   onSetScrumMaster: (playerId: string) => void;
   onViewDetails: (player: CardData) => void;
 }
 
-export const TeamPitch: React.FC<TeamPitchProps> = ({ lineup, formation, onSlotClick, onRemovePlayer, onSetScrumMaster, onViewDetails }) => {
+export const TeamPitch: React.FC<TeamPitchProps> = ({ lineup, formation, analysis, onSlotClick, onRemovePlayer, onSetScrumMaster, onViewDetails }) => {
   
-  const Slot = ({ role, top, left }: { role: PositionRole, top: string, left: string }) => {
+  const Slot: React.FC<{ role: PositionRole, top: string, left: string }> = ({ role, top, left }) => {
     const player = lineup.players[role];
     const isScrumMaster = player ? lineup.scrumMasterId === player.id : false;
     const label = ROLE_LABELS[role] || role;
+    
+    // Get fitness for this specific slot if analysis exists
+    const fitness = analysis?.roleFitness[role];
 
     return (
       <div 
@@ -33,6 +37,7 @@ export const TeamPitch: React.FC<TeamPitchProps> = ({ lineup, formation, onSlotC
                       data={player} 
                       variant="mini" 
                       isScrumMaster={isScrumMaster} 
+                      fitness={fitness}
                     />
                   </div>
                   
